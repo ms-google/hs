@@ -1,0 +1,67 @@
+name: Immich Setup & Verification
+
+on:
+  push:
+
+jobs:
+  setup_and_verify_immich:
+    runs-on: ubuntu-24.04 # Specifies the base Ubuntu 24.04 image
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install Docker and Docker Compose
+        uses: docker/setup-buildx-action@v3 # This action conveniently installs Docker and Docker Compose v2 (docker compose)
+
+      - name: Log in to GitHub Container Registry (GHCR)
+        # Use the built-in GITHUB_TOKEN to authenticate with GHCR
+        # This is essential for pulling images from ghcr.io if rate limited or private
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin 
+
+      - name: Start Immich services
+        # Change working-directory to where your docker-compose.yml and .env are located
+        working-directory: docker-configs/immich
+        run: |
+          echo "Starting Immich services with docker compose from $(pwd)..."
+          # Ensure volumes are created if not already
+          docker compose pull # Pull images first to ensure they are the specified version
+          docker compose up -d
+
+      - name: Wait for Immich to fully initialize
+        run: |
+          echo "Sleeping for 120 seconds before verification..."
+          sleep 120
+
+      - name: Verify Immich API is up and running
+        run: |
+          echo "Verifying Immich API..."
+          # The API server runs on IMMICH_SERVER_PORT (2283 by default) as defined in .env
+          curl -f -s http://localhost:2283/api/server/ping
+          if [ $? -eq 0 ]; then
+            echo "Immich API service is up and running!"
+          else
+            echo "Immich API service failed to respond!"
+            exit 1
+          fi
+
+      - name: Verify Immich Web UI is accessible
+        run: |
+          echo "Verifying Immich Web UI..."
+          # The web UI runs on IMMICH_WEB_PORT (8080 by default) as defined in .env
+          curl -f -s http://localhost:8080/
+          if [ $? -eq 0 ]; then
+            echo "Immich Web UI is accessible!"
+          else
+            echo "Immich Web UI failed to respond!"
+            exit 1
+          fi
+
+      - name: Display running Docker containers (for debugging)
+        if: always() # Run even if previous steps fail
+        run: docker ps -a
+
+      - name: Display Docker Compose logs (for debugging)
+        if: always() # Run even if previous steps fail
+        working-directory: docker-configs/immich
+        run: docker compose logs
